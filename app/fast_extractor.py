@@ -96,23 +96,23 @@ class FastExtractor:
                     state = address_match.group(2).strip()
                     postal_code = address_match.group(3)
                 else:
-                # Fallback patterns
-                zip_pattern = r'\b(\d{5})(?:-\d{4})?\b'
-                zip_matches = re.findall(zip_pattern, text)
-                # Take the last 5-digit number (more likely to be zip than street number)
-                postal_code = zip_matches[-1] if zip_matches else None
-                
-                # State pattern - look for common state names or abbreviations
-                state_pattern = r'\b(FL|Florida|CA|California|NY|New York|TX|Texas|[A-Z]{2})\b'
-                state_match = re.search(state_pattern, text, re.IGNORECASE)
-                state = state_match.group(1) if state_match else None
-                
-                # City - word(s) before state
-                city = None
-                if state:
-                    city_pattern = r'\b([A-Za-z]+(?:\s+[A-Za-z]+)*),?\s+' + re.escape(state)
-                    city_match = re.search(city_pattern, text)
-                    city = city_match.group(1) if city_match else None
+                    # Fallback patterns
+                    zip_pattern = r'\b(\d{5})(?:-\d{4})?\b'
+                    zip_matches = re.findall(zip_pattern, text)
+                    # Take the last 5-digit number (more likely to be zip than street number)
+                    postal_code = zip_matches[-1] if zip_matches else None
+                    
+                    # State pattern - look for common state names or abbreviations
+                    state_pattern = r'\b(FL|Florida|CA|California|NY|New York|TX|Texas|[A-Z]{2})\b'
+                    state_match = re.search(state_pattern, text, re.IGNORECASE)
+                    state = state_match.group(1) if state_match else None
+                    
+                    # City - word(s) before state
+                    city = None
+                    if state:
+                        city_pattern = r'\b([A-Za-z]+(?:\s+[A-Za-z]+)*),?\s+' + re.escape(state)
+                        city_match = re.search(city_pattern, text)
+                        city = city_match.group(1) if city_match else None
             
             # Extract unit/suite (include the label)
             unit_pattern = r'((?:Suite|Unit|Apt|Apartment|#)\s*\d+\w*)'
