@@ -1,0 +1,50 @@
+# All-in-one Dockerfile for App Runner (includes Ollama)
+FROM python:3.11
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies and curl
+RUN apt-get update && apt-get install -y \
+    curl \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Ollama
+RUN curl -fsSL https://ollama.ai/install.sh | sh
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Create necessary directories
+RUN mkdir -p /app/chroma_db /root/.ollama
+
+# Create a startup script
+RUN echo '#!/bin/bash\n\
+echo "Starting Ollama service..."\n\
+ollama serve &\n\
+OLLAMA_PID=$!\n\
+echo "Waiting for Ollama to start..."\n\
+sleep 10\n\
+echo "Pulling gemma:2b model..."\n\
+ollama pull gemma:2b || echo "Failed to pull model"\n\
+echo "Starting API server..."\n\
+python -m uvicorn main:app --host 0.0.0.0 --port 8000 &\n\
+API_PID=$!\n\
+wait $API_PID' > /app/start.sh && chmod +x /app/start.sh
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV OLLAMA_BASE_URL=http://localhost:11434
+ENV OLLAMA_MODEL=gemma:2b
+
+# Expose port
+EXPOSE 8000
+
+# Run the startup script
+CMD ["/app/start.sh"]
