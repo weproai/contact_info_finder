@@ -1,11 +1,11 @@
-EXTRACTION_PROMPT = """Extract contact info from: {text}
+EXTRACTION_PROMPT = """Extract: {text}
 
-Return JSON with extracted values (use null if not found):
+JSON:
 {{
-  "client_name": "extracted name or null",
-  "company_name": "extracted company or null",
-  "email": "extracted email or null",
-  "phone_numbers": [{{"number": "extracted phone", "extension": "ext if any", "type": "primary"}}],
-  "address": {{"unit": null, "street": "extracted street", "city": "extracted city", "state": "extracted state", "postal_code": "extracted zip", "country": "USA"}},
-  "notes": "any other text"
+  "client_name": "name",
+  "company_name": "company",
+  "email": "email",
+  "phone_numbers": [{{"number": "phone", "extension": "ext", "type": "primary"}}],
+  "address": {{"unit": null, "street": "street", "city": "city", "state": "state", "postal_code": "zip", "country": "USA"}},
+  "notes": "other"
 }}"""

@@ -136,9 +136,11 @@ class ContactExtractor:
                         }
                     ],
                     options={
-                        'temperature': 0.1,  # Low temperature for consistent output
-                        'top_p': 0.9,
-                        'seed': 42  # For more consistent results
+                        'temperature': 0.0,  # Zero for faster, deterministic output
+                        'top_p': 0.1,  # Lower = faster
+                        'num_predict': 150,  # Limit output length
+                        'repeat_penalty': 1.0,
+                        'seed': 42
                     }
                 )
             

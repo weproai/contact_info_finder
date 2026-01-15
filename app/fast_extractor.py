@@ -12,8 +12,9 @@ class FastExtractor:
     @staticmethod
     def can_extract_fast(text: str) -> bool:
         """Check if text is simple enough for fast extraction"""
-        # Simple heuristic: if text is short and has clear patterns
-        return len(text) < 500 and bool(re.search(r'\b\d{10}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b', text))
+        # More aggressive fast mode - try regex first for most texts
+        # Check if text has any phone-like pattern
+        return len(text) < 1000 and bool(re.search(r'\d{3,}', text))
     
     @staticmethod
     def extract_fast(text: str) -> Optional[ExtractedContact]:
