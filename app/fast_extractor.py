@@ -12,12 +12,12 @@ class FastExtractor:
     @staticmethod
     def can_extract_fast(text: str) -> bool:
         """Check if text is simple enough for fast extraction"""
-        # Only use fast mode for very specific patterns
-        # Must have "Contact X at Y" pattern OR be very short
-        has_contact_pattern = bool(re.search(r'Contact\s+\w+\s+at', text, re.IGNORECASE))
-        is_simple_format = len(text) < 200 and text.count(':') < 3
+        # Use fast mode for most texts with clear patterns
+        has_phone = bool(re.search(r'\+?\d{10,}|\(\d{3}\)|\d{3}[-.\s]\d{3}[-.\s]\d{4}', text))
+        has_structured_format = bool(re.search(r'(Customer|Contact|Name|Phone|Address|Email):', text, re.IGNORECASE))
         
-        return has_contact_pattern or is_simple_format
+        # Use fast mode if it has phone numbers or structured format
+        return len(text) < 1500 and (has_phone or has_structured_format)
     
     @staticmethod
     def extract_fast(text: str) -> Optional[ExtractedContact]:
@@ -62,15 +62,40 @@ class FastExtractor:
             email = email_match.group(0) if email_match else None
             
             # Extract address components (20-40ms)
-            # Look for city, state zip pattern (e.g., "San Francisco, CA 94105")
-            address_pattern = r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2})\s+(\d{5})(?:-\d{4})?\b'
-            address_match = re.search(address_pattern, text)
-            
-            if address_match:
-                city = address_match.group(1).strip()
-                state = address_match.group(2).strip()
-                postal_code = address_match.group(3)
+            # First try "Address: " pattern
+            if 'Address:' in text:
+                addr_section = text.split('Address:')[1].split('Service:')[0] if 'Service:' in text else text.split('Address:')[1]
+                # Extract zip first (most reliable)
+                zip_match = re.search(r'\b(\d{5})(?:-\d{4})?\b', addr_section)
+                postal_code = zip_match.group(1) if zip_match else None
+                
+                # Extract state (before zip)
+                state_match = re.search(r'\b(FL|Florida|CA|California|NY|New York|TX|Texas|[A-Z]{2})\b', addr_section, re.IGNORECASE)
+                state = state_match.group(1) if state_match else None
+                if state and len(state) > 2:
+                    # Convert full state names to abbreviations
+                    state_map = {'Florida': 'FL', 'California': 'CA', 'New York': 'NY', 'Texas': 'TX'}
+                    state = state_map.get(state.title(), state[:2].upper())
+                
+                # Extract city (word before state)
+                if state_match:
+                    # Get text before state
+                    before_state = addr_section[:state_match.start()].strip()
+                    # City is usually the last word(s) before state
+                    city_match = re.search(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*$', before_state)
+                    city = city_match.group(1) if city_match else None
+                else:
+                    city = None
             else:
+                # Fallback: Look for city, state zip pattern
+                address_pattern = r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2})\s+(\d{5})(?:-\d{4})?\b'
+                address_match = re.search(address_pattern, text)
+                
+                if address_match:
+                    city = address_match.group(1).strip()
+                    state = address_match.group(2).strip()
+                    postal_code = address_match.group(3)
+                else:
                 # Fallback patterns
                 zip_pattern = r'\b(\d{5})(?:-\d{4})?\b'
                 zip_matches = re.findall(zip_pattern, text)
@@ -95,9 +120,17 @@ class FastExtractor:
             unit = unit_match.group(1).strip() if unit_match else None
             
             # Street address (number + street name)
-            street_pattern = r'\b(\d+\s+[A-Za-z\s]+(?:St|Street|Ave|Avenue|Blvd|Boulevard|Rd|Road|Dr|Drive|Cir|Circle|Ln|Lane|Way|Court|Ct|Place|Pl))\b'
-            street_match = re.search(street_pattern, text, re.IGNORECASE)
-            street = street_match.group(1) if street_match else None
+            if 'Address:' in text:
+                # Extract from Address: section
+                addr_section = text.split('Address:')[1].split('Service:')[0] if 'Service:' in text else text.split('Address:')[1]
+                street_pattern = r'\b(\d+\s+[A-Za-z\s]+?)(?:\s+(?:' + (city or 'NoCity') + ')|$)'
+                street_match = re.search(street_pattern, addr_section)
+                street = street_match.group(1).strip() if street_match else None
+            else:
+                # Standard pattern
+                street_pattern = r'\b(\d+\s+[A-Za-z\s]+(?:St|Street|Ave|Avenue|Blvd|Boulevard|Rd|Road|Dr|Drive|Cir|Circle|Ln|Lane|Way|Court|Ct|Place|Pl))\b'
+                street_match = re.search(street_pattern, text, re.IGNORECASE)
+                street = street_match.group(1) if street_match else None
             
             # Build address if we have components
             address = None
@@ -115,12 +148,19 @@ class FastExtractor:
             client_name = None
             company_name = None
             
-            # Pattern: "Contact NAME at COMPANY"
-            contact_pattern = r'Contact\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+at\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)'
-            contact_match = re.search(contact_pattern, text)
-            if contact_match:
-                client_name = contact_match.group(1)
-                company_name = contact_match.group(2)
+            # Pattern 1: "Customer: NAME" or "Client: NAME"
+            customer_pattern = r'(?:Customer|Client):\s*([A-Z][A-Z\s]+?)(?:\s+Phone:|$)'
+            customer_match = re.search(customer_pattern, text)
+            if customer_match:
+                client_name = customer_match.group(1).strip()
+            
+            # Pattern 2: "Contact NAME at COMPANY"
+            if not client_name:
+                contact_pattern = r'Contact\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+at\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)'
+                contact_match = re.search(contact_pattern, text)
+                if contact_match:
+                    client_name = contact_match.group(1)
+                    company_name = contact_match.group(2)
             
             # Build notes - only include unextracted information
             notes_parts = []
