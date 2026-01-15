@@ -136,9 +136,11 @@ class ContactExtractor:
                         }
                     ],
                     options={
-                        'temperature': 0.0,  # Zero for faster, deterministic output
+                        'temperature': 0.0,  # Zero for fastest
                         'top_p': 0.1,  # Lower = faster
-                        'num_predict': 150,  # Limit output length
+                        'num_predict': 100,  # Shorter output limit
+                        'num_ctx': 512,  # Smaller context window
+                        'num_thread': 4,  # Use all CPU cores
                         'repeat_penalty': 1.0,
                         'seed': 42
                     }
