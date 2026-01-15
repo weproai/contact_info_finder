@@ -86,6 +86,11 @@ class FastExtractor:
                     city_match = re.search(city_pattern, text)
                     city = city_match.group(1) if city_match else None
             
+            # Extract unit/suite
+            unit_pattern = r'(?:Suite|Unit|Apt|Apartment|#)\s*(\d+\w*)'
+            unit_match = re.search(unit_pattern, text, re.IGNORECASE)
+            unit = unit_match.group(1) if unit_match else None
+            
             # Street address (number + street name)
             street_pattern = r'\b(\d+\s+[A-Za-z\s]+(?:St|Street|Ave|Avenue|Blvd|Boulevard|Rd|Road|Dr|Drive|Cir|Circle|Ln|Lane|Way|Court|Ct|Place|Pl))\b'
             street_match = re.search(street_pattern, text, re.IGNORECASE)
@@ -95,6 +100,7 @@ class FastExtractor:
             address = None
             if any([street, city, state, postal_code]):
                 address = Address(
+                    unit=unit,
                     street=street,
                     city=city,
                     state=state,
@@ -113,27 +119,48 @@ class FastExtractor:
                 client_name = contact_match.group(1)
                 company_name = contact_match.group(2)
             
-            # Everything else goes to notes
-            notes = text
-            # Remove extracted components from notes
-            if client_name:
-                notes = notes.replace(f"Contact {client_name}", "", 1)
-            if company_name:
-                notes = notes.replace(f"at {company_name}", "", 1)
-            for phone in phone_numbers:
-                # Remove phone with extension
-                notes = re.sub(r'\(?[\d\s\-\.]+\)?\s*(?:ext\.?|x)?\s*\d*', '', notes, count=1)
-            if email:
-                notes = notes.replace(email, '')
-            if address and address.street:
-                notes = notes.replace(address.street, '')
-            # Clean up extra spaces and punctuation
-            notes = re.sub(r'\s+', ' ', notes).strip()
-            notes = re.sub(r'^[:\.\s]+|[:\.\s]+$', '', notes).strip()
+            # Build notes - only include unextracted information
+            notes_parts = []
+            remaining_text = text
             
-            # If notes is empty or just contains extracted info, set to None
-            if not notes or notes in ['.', ':', 'Phone', 'Phone:', '']:
-                notes = None
+            # Remove all extracted components
+            if client_name and company_name:
+                remaining_text = remaining_text.replace(f"Contact {client_name} at {company_name}", "", 1)
+            elif client_name:
+                remaining_text = remaining_text.replace(f"Contact {client_name}", "", 1)
+            
+            # Remove phone numbers with their labels
+            for phone in phone_numbers:
+                # Remove various phone formats and labels
+                phone_patterns = [
+                    rf'Phone:\s*\(?\d{{3}}\)?[-.\s]?\d{{3}}[-.\s]?\d{{4}}\s*(?:ext\.?\s*\d+)?',
+                    rf'\(?\d{{3}}\)?[-.\s]?\d{{3}}[-.\s]?\d{{4}}\s*(?:ext\.?\s*\d+)?',
+                ]
+                for pattern in phone_patterns:
+                    remaining_text = re.sub(pattern, '', remaining_text, count=1, flags=re.IGNORECASE)
+            
+            # Remove email with label
+            if email:
+                remaining_text = re.sub(rf'email:\s*{re.escape(email)}', '', remaining_text, flags=re.IGNORECASE)
+                remaining_text = remaining_text.replace(email, '')
+            
+            # Remove address components with labels
+            if address:
+                # Remove "Office:" or "Address:" labels
+                remaining_text = re.sub(r'(?:Office|Address):\s*', '', remaining_text, flags=re.IGNORECASE)
+                # Remove suite/unit
+                remaining_text = re.sub(r'Suite\s+\d+\w*,?\s*', '', remaining_text, flags=re.IGNORECASE)
+                if address.street:
+                    remaining_text = remaining_text.replace(address.street, '')
+                if address.city and address.state and address.postal_code:
+                    remaining_text = remaining_text.replace(f"{address.city}, {address.state} {address.postal_code}", '')
+            
+            # Clean up remaining text
+            remaining_text = re.sub(r'[,\s]+', ' ', remaining_text).strip()
+            remaining_text = re.sub(r'^[:\.\s,]+|[:\.\s,]+$', '', remaining_text).strip()
+            
+            # Only set notes if there's actual content left
+            notes = remaining_text if remaining_text and len(remaining_text) > 2 else None
             
             return ExtractedContact(
                 client_name=client_name,
