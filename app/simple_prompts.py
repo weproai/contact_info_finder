@@ -1,16 +1,11 @@
-"""Simplified prompts for smaller/faster models"""
+EXTRACTION_PROMPT = """Extract from: {text}
 
-SIMPLE_EXTRACTION_PROMPT = """Extract from: {text}
-
-Find:
-- Phone: (10 digit number)
-- Street address
-- City, State ZIP
-- Any other info = notes
-
-Output JSON only:
+JSON output:
 {{
-  "phone_numbers": [{{"number": "PHONE_HERE", "extension": null, "type": "primary"}}],
-  "address": {{"street": "STREET", "city": "CITY", "state": "STATE", "postal_code": "ZIP", "country": "USA"}},
-  "notes": "OTHER_INFO"
+  "client_name": null,
+  "company_name": null,
+  "email": null,
+  "phone_numbers": [{{"number": "phone", "extension": null, "type": "primary"}}],
+  "address": {{"unit": null, "street": "street", "city": "city", "state": "state", "postal_code": "zip", "country": "USA"}},
+  "notes": "other text"
 }}"""
