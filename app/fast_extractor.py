@@ -86,10 +86,10 @@ class FastExtractor:
                     city_match = re.search(city_pattern, text)
                     city = city_match.group(1) if city_match else None
             
-            # Extract unit/suite
-            unit_pattern = r'(?:Suite|Unit|Apt|Apartment|#)\s*(\d+\w*)'
+            # Extract unit/suite (include the label)
+            unit_pattern = r'((?:Suite|Unit|Apt|Apartment|#)\s*\d+\w*)'
             unit_match = re.search(unit_pattern, text, re.IGNORECASE)
-            unit = unit_match.group(1) if unit_match else None
+            unit = unit_match.group(1).strip() if unit_match else None
             
             # Street address (number + street name)
             street_pattern = r'\b(\d+\s+[A-Za-z\s]+(?:St|Street|Ave|Avenue|Blvd|Boulevard|Rd|Road|Dr|Drive|Cir|Circle|Ln|Lane|Way|Court|Ct|Place|Pl))\b'
@@ -148,8 +148,10 @@ class FastExtractor:
             if address:
                 # Remove "Office:" or "Address:" labels
                 remaining_text = re.sub(r'(?:Office|Address):\s*', '', remaining_text, flags=re.IGNORECASE)
-                # Remove suite/unit
-                remaining_text = re.sub(r'Suite\s+\d+\w*,?\s*', '', remaining_text, flags=re.IGNORECASE)
+                # Remove unit if extracted
+                if address.unit:
+                    remaining_text = remaining_text.replace(address.unit + ',', '')
+                    remaining_text = remaining_text.replace(address.unit, '')
                 if address.street:
                     remaining_text = remaining_text.replace(address.street, '')
                 if address.city and address.state and address.postal_code:
