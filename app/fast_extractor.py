@@ -12,17 +12,20 @@ class FastExtractor:
     @staticmethod
     def can_extract_fast(text: str) -> bool:
         """Check if text is simple enough for fast extraction"""
-        # More aggressive fast mode - try regex first for most texts
-        # Check if text has any phone-like pattern
-        return len(text) < 1000 and bool(re.search(r'\d{3,}', text))
+        # Only use fast mode for very specific patterns
+        # Must have "Contact X at Y" pattern OR be very short
+        has_contact_pattern = bool(re.search(r'Contact\s+\w+\s+at', text, re.IGNORECASE))
+        is_simple_format = len(text) < 200 and text.count(':') < 3
+        
+        return has_contact_pattern or is_simple_format
     
     @staticmethod
     def extract_fast(text: str) -> Optional[ExtractedContact]:
         """Fast extraction using regex only - millisecond performance"""
         try:
             # Extract phone numbers with extensions (10-50ms)
-            phone_ext_pattern = r'(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\s*(?:ext\.?|extension|x)\s*(\d+)'
-            phone_pattern = r'\b(\d{10})\b|\b(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\b'
+            phone_ext_pattern = r'(\+?1?\s*\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\s*(?:ext\.?|extension|x)\s*(\d+)'
+            phone_pattern = r'\+?1?(\d{10})\b|\b(\+?1?\s*\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\b'
             
             phone_numbers = []
             
