@@ -123,28 +123,32 @@ class ContactExtractor:
             try:
                 prompt = EXTRACTION_PROMPT.format(text=text)
                 
-                response = self.ollama_client.chat(
-                    model=self.model,
-                    messages=[
-                        {
-                            'role': 'system',
-                            'content': 'You MUST return ONLY valid JSON for contact extraction. No explanations, no code.'
-                        },
-                        {
-                            'role': 'user',
-                            'content': prompt
+                # Add timeout using httpx client
+                import httpx
+                
+                with httpx.Client(timeout=10.0) as client:
+                    response = self.ollama_client.chat(
+                        model=self.model,
+                        messages=[
+                            {
+                                'role': 'system',
+                                'content': 'Extract contact info and return JSON only.'
+                            },
+                            {
+                                'role': 'user',
+                                'content': prompt
+                            }
+                        ],
+                        options={
+                            'temperature': 0.0,  # Zero for fastest
+                            'top_p': 0.1,  # Lower = faster
+                            'num_predict': 80,  # Even shorter
+                            'num_ctx': 256,  # Minimal context
+                            'num_thread': 4,  # Use all CPU cores
+                            'repeat_penalty': 1.0,
+                            'seed': 42
                         }
-                    ],
-                    options={
-                        'temperature': 0.0,  # Zero for fastest
-                        'top_p': 0.1,  # Lower = faster
-                        'num_predict': 100,  # Shorter output limit
-                        'num_ctx': 512,  # Smaller context window
-                        'num_thread': 4,  # Use all CPU cores
-                        'repeat_penalty': 1.0,
-                        'seed': 42
-                    }
-                )
+                    )
             
                 # Extract JSON from response
                 response_text = response['message']['content']
