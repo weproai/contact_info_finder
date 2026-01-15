@@ -59,14 +59,14 @@ class FastExtractor:
             email = email_match.group(0) if email_match else None
             
             # Extract address components (20-40ms)
-            # Look for state + zip pattern first (more reliable)
-            state_zip_pattern = r'\b([A-Za-z\s]+),\s*([A-Z]{2}|[A-Za-z]+)\s+(\d{5})(?:-\d{4})?\b'
-            state_zip_match = re.search(state_zip_pattern, text)
+            # Look for city, state zip pattern (e.g., "San Francisco, CA 94105")
+            address_pattern = r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2})\s+(\d{5})(?:-\d{4})?\b'
+            address_match = re.search(address_pattern, text)
             
-            if state_zip_match:
-                city = state_zip_match.group(1).strip()
-                state = state_zip_match.group(2).strip()
-                postal_code = state_zip_match.group(3)
+            if address_match:
+                city = address_match.group(1).strip()
+                state = address_match.group(2).strip()
+                postal_code = address_match.group(3)
             else:
                 # Fallback patterns
                 zip_pattern = r'\b(\d{5})(?:-\d{4})?\b'
@@ -115,15 +115,25 @@ class FastExtractor:
             
             # Everything else goes to notes
             notes = text
-            # Remove extracted components
+            # Remove extracted components from notes
+            if client_name:
+                notes = notes.replace(f"Contact {client_name}", "", 1)
+            if company_name:
+                notes = notes.replace(f"at {company_name}", "", 1)
             for phone in phone_numbers:
-                notes = re.sub(r'\b' + phone.number + r'\b', '', notes)
+                # Remove phone with extension
+                notes = re.sub(r'\(?[\d\s\-\.]+\)?\s*(?:ext\.?|x)?\s*\d*', '', notes, count=1)
             if email:
                 notes = notes.replace(email, '')
             if address and address.street:
                 notes = notes.replace(address.street, '')
-            # Clean up
+            # Clean up extra spaces and punctuation
             notes = re.sub(r'\s+', ' ', notes).strip()
+            notes = re.sub(r'^[:\.\s]+|[:\.\s]+$', '', notes).strip()
+            
+            # If notes is empty or just contains extracted info, set to None
+            if not notes or notes in ['.', ':', 'Phone', 'Phone:', '']:
+                notes = None
             
             return ExtractedContact(
                 client_name=client_name,
