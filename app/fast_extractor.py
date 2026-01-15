@@ -20,22 +20,38 @@ class FastExtractor:
     def extract_fast(text: str) -> Optional[ExtractedContact]:
         """Fast extraction using regex only - millisecond performance"""
         try:
-            # Extract phone numbers (10-50ms)
-            phone_pattern = r'\b(\d{10})\b|\b(\d{3})[-.\s]?(\d{3})[-.\s]?(\d{4})\b'
-            phone_matches = re.findall(phone_pattern, text)
+            # Extract phone numbers with extensions (10-50ms)
+            phone_ext_pattern = r'(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\s*(?:ext\.?|extension|x)\s*(\d+)'
+            phone_pattern = r'\b(\d{10})\b|\b(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\b'
             
             phone_numbers = []
-            for match in phone_matches:
-                if match[0]:  # 10-digit format
-                    phone = match[0]
-                else:  # formatted
-                    phone = f"{match[1]}{match[2]}{match[3]}"
-                
+            
+            # First check for phones with extensions
+            ext_matches = re.findall(phone_ext_pattern, text, re.IGNORECASE)
+            for phone_match, ext in ext_matches:
+                # Clean phone number
+                phone_clean = re.sub(r'[^\d]', '', phone_match)
                 phone_numbers.append(PhoneNumber(
-                    number=phone,
-                    extension=None,
+                    number=phone_clean,
+                    extension=ext,
                     type='primary'
                 ))
+            
+            # Then find phones without extensions (if no extension matches found)
+            if not ext_matches:
+                phone_matches = re.findall(phone_pattern, text)
+                for match in phone_matches:
+                    if match[0]:  # 10-digit format
+                        phone = match[0]
+                    else:  # formatted
+                        phone = re.sub(r'[^\d]', '', match[1])
+                    
+                    if phone and len(phone) >= 10:
+                        phone_numbers.append(PhoneNumber(
+                            number=phone,
+                            extension=None,
+                            type='primary'
+                        ))
             
             # Extract email (5-10ms)
             email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
@@ -86,10 +102,16 @@ class FastExtractor:
                     country="USA" if state else None
                 )
             
-            # Extract name (first capitalized words before phone/email)
-            name_pattern = r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)'
-            name_match = re.search(name_pattern, text)
-            client_name = name_match.group(1) if name_match else None
+            # Extract name and company
+            client_name = None
+            company_name = None
+            
+            # Pattern: "Contact NAME at COMPANY"
+            contact_pattern = r'Contact\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+at\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)'
+            contact_match = re.search(contact_pattern, text)
+            if contact_match:
+                client_name = contact_match.group(1)
+                company_name = contact_match.group(2)
             
             # Everything else goes to notes
             notes = text
@@ -105,7 +127,7 @@ class FastExtractor:
             
             return ExtractedContact(
                 client_name=client_name,
-                company_name=None,
+                company_name=company_name,
                 phone_numbers=phone_numbers,
                 email=email,
                 address=address,
