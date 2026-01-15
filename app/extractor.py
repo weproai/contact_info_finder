@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 import phonenumbers
 from app.config import settings
 from app.models import ExtractedContact, PhoneNumber, Address
-from app.simple_prompts import EXTRACTION_PROMPT, VALIDATION_PROMPT
+from app.simple_prompts import EXTRACTION_PROMPT
 from app.database import chroma_manager
 from app.fast_extractor import FastExtractor
 
