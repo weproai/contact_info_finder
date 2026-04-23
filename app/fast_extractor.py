@@ -12,12 +12,30 @@ class FastExtractor:
     @staticmethod
     def can_extract_fast(text: str) -> bool:
         """Check if text is simple enough for fast extraction"""
-        # Only use fast mode for very simple patterns
-        # "Contact NAME at COMPANY" format only
-        has_simple_contact = bool(re.search(r'^Contact\s+\w+\s+at\s+\w+', text))
-        
-        # For now, disable fast mode for complex formats to ensure accuracy
-        return has_simple_contact and len(text) < 200
+        if not text or len(text) > 1000:
+            return False
+
+        has_phone = bool(
+            re.search(
+                r'\b\d{10}\b|\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}',
+                text
+            )
+        )
+        has_email = bool(
+            re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b', text)
+        )
+        has_contact_pattern = bool(
+            re.search(r'\b(?:Contact|Customer|Client|Phone|Email|Office|Address)\b', text, re.IGNORECASE)
+        )
+        has_address_hint = bool(
+            re.search(
+                r'\b\d+\s+[A-Za-z0-9.\s]+(?:St|Street|Ave|Avenue|Blvd|Boulevard|Rd|Road|Dr|Drive|Cir|Circle|Ln|Lane|Way|Court|Ct|Place|Pl)\b',
+                text,
+                re.IGNORECASE,
+            )
+        )
+
+        return has_phone or has_email or (has_contact_pattern and has_address_hint)
     
     @staticmethod
     def extract_fast(text: str) -> Optional[ExtractedContact]:
