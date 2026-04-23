@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contact Info Finder Verifier</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-border: #334155;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-strong: #0ea5e9;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #020617 0%, #111827 100%);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 2rem;
+    }
+
+    .subtitle {
+      margin: 0 0 24px;
+      color: var(--muted);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 20px;
+    }
+
+    .panel {
+      background: rgba(17, 24, 39, 0.88);
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      padding: 18px;
+      backdrop-filter: blur(6px);
+      box-shadow: 0 10px 35px rgba(0, 0, 0, 0.25);
+    }
+
+    .panel h2 {
+      margin-top: 0;
+      margin-bottom: 14px;
+      font-size: 1.05rem;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 260px;
+      resize: vertical;
+      border-radius: 12px;
+      border: 1px solid #475569;
+      background: #020617;
+      color: var(--text);
+      padding: 14px;
+      font: inherit;
+      line-height: 1.5;
+    }
+
+    .row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 11px 16px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.08s ease, opacity 0.2s ease, background 0.2s ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+      transform: none;
+    }
+
+    .primary {
+      background: var(--accent);
+      color: #082f49;
+    }
+
+    .primary:hover {
+      background: var(--accent-strong);
+      color: white;
+    }
+
+    .secondary {
+      background: #1e293b;
+      color: var(--text);
+      border: 1px solid #334155;
+    }
+
+    label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .badge-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid #334155;
+      background: #0f172a;
+      color: var(--text);
+      font-size: 0.9rem;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--muted);
+      display: inline-block;
+    }
+
+    .dot.success { background: var(--success); }
+    .dot.warning { background: var(--warning); }
+    .dot.danger { background: var(--danger); }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .meta-card {
+      background: #020617;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 12px;
+    }
+
+    .meta-card strong {
+      display: block;
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-bottom: 6px;
+    }
+
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #020617;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 14px;
+      min-height: 360px;
+      overflow: auto;
+      font-size: 0.92rem;
+      line-height: 1.55;
+    }
+
+    .status-line {
+      margin-top: 12px;
+      color: var(--muted);
+      min-height: 24px;
+    }
+
+    @media (max-width: 900px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Contact Info Finder Verifier</h1>
+    <p class="subtitle">Paste raw text, click extract, and review the structured output below.</p>
+
+    <div class="badge-row" id="healthBadges">
+      <span class="badge"><span class="dot"></span> Loading health...</span>
+    </div>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>Input</h2>
+        <textarea id="inputText" placeholder="Paste lead text, chat, or dispatcher message here...">Contact John Smith at TechCorp International. Phone: (555) 123-4567 ext 234, email: john.smith@techcorp.com. Office: Suite 1500, 123 Business Blvd, San Francisco, CA 94105</textarea>
+
+        <div class="row">
+          <label>
+            <input type="checkbox" id="useCache" checked>
+            Use cache
+          </label>
+          <button class="primary" id="extractButton">Extract</button>
+          <button class="secondary" id="sampleButton">Load sample</button>
+        </div>
+
+        <div class="meta">
+          <div class="meta-card">
+            <strong>Status</strong>
+            <span id="extractStatus">Idle</span>
+          </div>
+          <div class="meta-card">
+            <strong>Timing</strong>
+            <span id="extractTiming">-</span>
+          </div>
+          <div class="meta-card">
+            <strong>Cache Hit</strong>
+            <span id="extractCache">-</span>
+          </div>
+          <div class="meta-card">
+            <strong>API Result</strong>
+            <span id="extractResult">-</span>
+          </div>
+        </div>
+
+        <div class="status-line" id="statusLine"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Result</h2>
+        <pre id="resultOutput">{}</pre>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const inputText = document.getElementById("inputText");
+    const useCache = document.getElementById("useCache");
+    const extractButton = document.getElementById("extractButton");
+    const sampleButton = document.getElementById("sampleButton");
+    const resultOutput = document.getElementById("resultOutput");
+    const extractStatus = document.getElementById("extractStatus");
+    const extractTiming = document.getElementById("extractTiming");
+    const extractCache = document.getElementById("extractCache");
+    const extractResult = document.getElementById("extractResult");
+    const statusLine = document.getElementById("statusLine");
+    const healthBadges = document.getElementById("healthBadges");
+
+    const sampleText = "DAVID WOODWORTH 12397938642 2735 Lakeview Dr East Naples Florida 34112 Service: New Garage Door Preferred Date and Time: 12/12 11:22 AM-11:22 AM B: Qualified Notes: New garage door";
+
+    function healthDotClass(value) {
+      if (value === "healthy") return "success";
+      if (value === "disabled") return "warning";
+      return "danger";
+    }
+
+    async function loadHealth() {
+      try {
+        const response = await fetch("/health");
+        const data = await response.json();
+        healthBadges.innerHTML = `
+          <span class="badge"><span class="dot ${healthDotClass(data.status)}"></span> API: ${data.status}</span>
+          <span class="badge"><span class="dot ${healthDotClass(data.llm_status)}"></span> Provider: ${data.llm_provider} (${data.llm_status})</span>
+          <span class="badge"><span class="dot ${healthDotClass(data.local_cache_status)}"></span> Local cache: ${data.local_cache_status}</span>
+          <span class="badge"><span class="dot ${healthDotClass(data.chromadb_status)}"></span> Chroma: ${data.chromadb_status}</span>
+        `;
+      } catch (error) {
+        healthBadges.innerHTML = `<span class="badge"><span class="dot danger"></span> Health check failed</span>`;
+      }
+    }
+
+    async function runExtract() {
+      const text = inputText.value.trim();
+      if (!text) {
+        statusLine.textContent = "Enter some text first.";
+        return;
+      }
+
+      extractButton.disabled = true;
+      statusLine.textContent = "Running extraction...";
+      extractStatus.textContent = "Running";
+      extractTiming.textContent = "-";
+      extractCache.textContent = "-";
+      extractResult.textContent = "-";
+
+      try {
+        const response = await fetch("/extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text,
+            use_cache: useCache.checked,
+          }),
+        });
+
+        const data = await response.json();
+        resultOutput.textContent = JSON.stringify(data, null, 2);
+        extractStatus.textContent = data.success ? "Success" : "Error";
+        extractTiming.textContent = typeof data.processing_time === "number"
+          ? `${data.processing_time.toFixed(3)}s`
+          : "-";
+        extractCache.textContent = data.cache_hit ? "Yes" : "No";
+        extractResult.textContent = data.status || "-";
+        statusLine.textContent = data.error || "Extraction completed.";
+      } catch (error) {
+        resultOutput.textContent = JSON.stringify({ error: error.message }, null, 2);
+        extractStatus.textContent = "Error";
+        statusLine.textContent = "Request failed. Check that the API is running.";
+      } finally {
+        extractButton.disabled = false;
+        loadHealth();
+      }
+    }
+
+    extractButton.addEventListener("click", runExtract);
+    sampleButton.addEventListener("click", () => {
+      inputText.value = sampleText;
+      statusLine.textContent = "Sample loaded.";
+    });
+
+    loadHealth();
+  </script>
+</body>
+</html>

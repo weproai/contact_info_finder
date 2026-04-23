@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 import logging
 import time
 from datetime import datetime
@@ -15,6 +18,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+VERIFY_PAGE_PATH = Path(__file__).resolve().parent / "verify.html"
 
 # Create FastAPI app
 app = FastAPI(
@@ -55,8 +59,15 @@ async def root():
     return {
         "message": "Contact Info Finder API",
         "version": "1.0.0",
-        "docs": "/docs"
+        "docs": "/docs",
+        "verify_ui": "/verify",
     }
+
+
+@app.get("/verify", tags=["UI"])
+async def verify_ui():
+    """Serve the manual verification UI."""
+    return FileResponse(VERIFY_PAGE_PATH)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
