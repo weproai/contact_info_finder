@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 import phonenumbers
 from app.config import settings
 from app.models import ExtractedContact, PhoneNumber, Address
-from app.simple_prompts import EXTRACTION_PROMPT
+from app.prompts import EXTRACTION_PROMPT
 from app.database import chroma_manager
 from app.fast_extractor import FastExtractor
 
@@ -122,63 +122,62 @@ class ContactExtractor:
         for attempt in range(max_retries):
             try:
                 prompt = EXTRACTION_PROMPT.format(text=text)
-                
-                # Add timeout using httpx client
-                import httpx
-                
-                with httpx.Client(timeout=10.0) as client:
-                    response = self.ollama_client.chat(
-                        model=self.model,
-                        messages=[
-                            {
-                                'role': 'system',
-                                'content': 'Extract contact info and return JSON only.'
-                            },
-                            {
-                                'role': 'user',
-                                'content': prompt
-                            }
-                        ],
-                        options={
-                            'temperature': 0.0,  # Zero for fastest
-                            'top_p': 0.1,  # Lower = faster
-                            'num_predict': 80,  # Even shorter
-                            'num_ctx': 256,  # Minimal context
-                            'num_thread': 4,  # Use all CPU cores
-                            'repeat_penalty': 1.0,
-                            'seed': 42
+
+                response = self.ollama_client.chat(
+                    model=self.model,
+                    messages=[
+                        {
+                            'role': 'system',
+                            'content': (
+                                'Extract contact information from the user text. '
+                                'Return a single valid JSON object only. '
+                                'Do not return markdown, backticks, Python code, '
+                                'comments, or explanations.'
+                            )
+                        },
+                        {
+                            'role': 'user',
+                            'content': prompt
                         }
-                    )
+                    ],
+                    format='json',
+                    options={
+                        'temperature': 0.0,
+                        'top_p': 0.1,
+                        'num_predict': 256,
+                        'num_ctx': 1024,
+                        'num_thread': 4,
+                        'repeat_penalty': 1.0,
+                        'seed': 42
+                    }
+                )
             
                 # Extract JSON from response
-                response_text = response['message']['content']
+                response_text = response['message']['content'].strip()
                 logger.info(f"LLM Response (attempt {attempt + 1}): {response_text[:500]}...")
-                
-                # Try to find JSON in the response
-                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group()
-                    
-                    # Fix common JSON issues from LLM
-                    json_str = json_str.replace('"postaL_code"', '"postal_code"')
-                    json_str = json_str.replace('"postalCode"', '"postal_code"')
-                    json_str = json_str.replace('"ext or null"', 'null')
-                    json_str = json_str.replace('"null"', 'null')  # Fix quoted null
-                    
-                    try:
-                        result = json.loads(json_str)
-                        logger.info(f"Successfully extracted JSON on attempt {attempt + 1}")
-                        return result
-                    except json.JSONDecodeError as e:
-                        logger.warning(f"JSON decode error on attempt {attempt + 1}: {e}")
-                        if attempt == max_retries - 1:
-                            logger.error(f"Failed to parse JSON after {max_retries} attempts")
-                            return None
-                        continue
-                else:
-                    logger.warning(f"No JSON found in response on attempt {attempt + 1}")
+
+                json_str = response_text
+
+                # Fallback for models that still wrap the JSON in extra text.
+                if not json_str.startswith('{'):
+                    json_match = re.search(r'\{.*\}', json_str, re.DOTALL)
+                    if json_match:
+                        json_str = json_match.group()
+
+                # Fix common JSON issues from LLM
+                json_str = json_str.replace('"postaL_code"', '"postal_code"')
+                json_str = json_str.replace('"postalCode"', '"postal_code"')
+                json_str = json_str.replace('"ext or null"', 'null')
+                json_str = json_str.replace('"null"', 'null')
+
+                try:
+                    result = json.loads(json_str)
+                    logger.info(f"Successfully extracted JSON on attempt {attempt + 1}")
+                    return result
+                except json.JSONDecodeError as e:
+                    logger.warning(f"JSON decode error on attempt {attempt + 1}: {e}")
                     if attempt == max_retries - 1:
-                        logger.error(f"No valid JSON found after {max_retries} attempts")
+                        logger.error(f"Failed to parse JSON after {max_retries} attempts")
                         return None
                     continue
             

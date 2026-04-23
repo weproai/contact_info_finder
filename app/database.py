@@ -1,5 +1,5 @@
-import chromadb
-from chromadb.config import Settings as ChromaSettings
+import os
+import sys
 from typing import Optional, List, Dict
 import json
 import logging
@@ -11,21 +11,54 @@ logger = logging.getLogger(__name__)
 
 class ChromaDBManager:
     def __init__(self):
+        self.client = None
+        self.collection = None
+        self.disabled_reason = None
+
+        if self._should_disable_chroma():
+            return
+
         # Disable telemetry to avoid errors
-        import os
         os.environ["ANONYMIZED_TELEMETRY"] = "False"
-        
-        self.client = chromadb.PersistentClient(
-            path=settings.chroma_persist_directory,
-            settings=ChromaSettings(
-                anonymized_telemetry=False,
-                allow_reset=True
+
+        try:
+            import chromadb
+            from chromadb.config import Settings as ChromaSettings
+
+            self.client = chromadb.PersistentClient(
+                path=settings.chroma_persist_directory,
+                settings=ChromaSettings(
+                    anonymized_telemetry=False,
+                    allow_reset=True
+                )
             )
-        )
-        self.collection = self._get_or_create_collection()
+            self.collection = self._get_or_create_collection()
+        except Exception as e:
+            self.disabled_reason = f"ChromaDB disabled: {e}"
+            logger.warning(self.disabled_reason)
+
+    def _should_disable_chroma(self) -> bool:
+        """Avoid importing ChromaDB in environments known to crash."""
+        if os.getenv("CHROMA_DISABLE", "").lower() in {"1", "true", "yes"}:
+            self.disabled_reason = "ChromaDB disabled via CHROMA_DISABLE"
+            logger.warning(self.disabled_reason)
+            return True
+
+        if sys.platform == "darwin" and sys.version_info[:2] <= (3, 9):
+            self.disabled_reason = (
+                "ChromaDB disabled on macOS with Python 3.9 because its "
+                "native numpy import crashes in this environment"
+            )
+            logger.warning(self.disabled_reason)
+            return True
+
+        return False
     
     def _get_or_create_collection(self):
         """Get or create the contact extractions collection"""
+        if not self.client:
+            return None
+
         try:
             return self.client.get_or_create_collection(
                 name=settings.chroma_collection_name,
@@ -38,6 +71,9 @@ class ChromaDBManager:
     
     def add_extraction(self, text: str, extraction: ExtractedContact, embedding: Optional[List[float]] = None):
         """Store an extraction in the database"""
+        if not self.collection:
+            return False
+
         try:
             # Convert extraction to dict for metadata
             metadata = {
@@ -66,6 +102,9 @@ class ChromaDBManager:
     
     def find_similar(self, text: str, n_results: int = 5) -> List[Dict]:
         """Find similar previously extracted texts"""
+        if not self.collection:
+            return []
+
         try:
             results = self.collection.query(
                 query_texts=[text],
@@ -89,6 +128,14 @@ class ChromaDBManager:
     
     def get_stats(self) -> Dict:
         """Get collection statistics"""
+        if not self.collection:
+            return {
+                "total_extractions": 0,
+                "collection_name": settings.chroma_collection_name,
+                "cache_enabled": False,
+                "message": self.disabled_reason or "ChromaDB is disabled"
+            }
+
         try:
             count = self.collection.count()
             return {
@@ -101,6 +148,9 @@ class ChromaDBManager:
     
     def health_check(self) -> bool:
         """Check if ChromaDB is healthy"""
+        if not self.client:
+            return False
+
         try:
             self.client.heartbeat()
             return True
