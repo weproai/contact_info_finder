@@ -34,6 +34,9 @@ class ExtractedContact(BaseModel):
     phone_numbers: List[PhoneNumber] = Field(default_factory=list)
     email: Optional[EmailStr] = None
     address: Optional[Address] = None
+    job_type: Optional[str] = None
+    scheduled_date: Optional[str] = None
+    appointment_time: Optional[str] = None
     notes: Optional[str] = None  # Additional information/notes
     raw_text: str
     extracted_at: datetime = Field(default_factory=datetime.now)

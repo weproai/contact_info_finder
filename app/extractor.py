@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+from datetime import date, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import ollama
@@ -116,7 +117,7 @@ class ContactExtractor:
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                prompt = EXTRACTION_PROMPT.format(text=text)
+                prompt = self._build_prompt(text)
                 response = self.openai_client.chat.completions.create(
                     model=self.model,
                     messages=[
@@ -152,7 +153,7 @@ class ContactExtractor:
 
         for attempt in range(max_retries):
             try:
-                prompt = EXTRACTION_PROMPT.format(text=text)
+                prompt = self._build_prompt(text)
 
                 response = self.ollama_client.chat(
                     model=self.model,
@@ -199,6 +200,13 @@ class ContactExtractor:
                 continue
         
         return None
+
+    def _build_prompt(self, text: str) -> str:
+        """Build extraction prompt with current date context."""
+        return EXTRACTION_PROMPT.format(
+            text=text,
+            today=date.today().isoformat(),
+        )
 
     def _parse_json_response(self, response_text: str) -> Optional[Dict]:
         json_str = response_text.strip()
@@ -366,6 +374,33 @@ class ContactExtractor:
         email = extraction_data.get('email')
         if email and isinstance(email, str) and ('not provided' in email.lower() or '@' not in email):
             email = None
+
+        job_type = extraction_data.get('job_type')
+        if job_type and isinstance(job_type, str):
+            job_type = job_type.strip().lower()
+        if not job_type:
+            job_type = None
+
+        scheduled_date = extraction_data.get('scheduled_date')
+        if scheduled_date and isinstance(scheduled_date, str):
+            scheduled_date = scheduled_date.strip()
+        if scheduled_date:
+            lowered_date = scheduled_date.lower()
+            if lowered_date == "today":
+                scheduled_date = date.today().isoformat()
+            elif lowered_date == "tomorrow":
+                scheduled_date = (date.today() + timedelta(days=1)).isoformat()
+        if not scheduled_date:
+            scheduled_date = None
+
+        appointment_time = (
+            extraction_data.get('appointment_time')
+            or extraction_data.get('time_window')
+        )
+        if appointment_time and isinstance(appointment_time, str):
+            appointment_time = appointment_time.strip()
+        if not appointment_time:
+            appointment_time = None
         
         # Extract notes if present
         notes = extraction_data.get('notes')
@@ -412,6 +447,9 @@ class ContactExtractor:
             phone_numbers=phone_numbers,
             email=email,
             address=address,
+            job_type=job_type,
+            scheduled_date=scheduled_date,
+            appointment_time=appointment_time,
             notes=notes,
             raw_text=raw_text
         )

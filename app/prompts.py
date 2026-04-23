@@ -2,6 +2,9 @@ EXTRACTION_PROMPT = """You are an AI dispatcher assistant.
 
 Your job is to analyze raw chat messages and convert them into structured CRM job data.
 
+TODAY:
+{today}
+
 INPUT:
 {text}
 
@@ -80,8 +83,8 @@ Examples:
 
 DATE:
 - If exact, format YYYY-MM-DD
-- "today" -> today's date
-- "tomorrow" -> today +1
+- "today" -> use TODAY
+- "tomorrow" -> TODAY + 1 day
 - If missing, return null
 
 TIME WINDOW:
@@ -138,7 +141,7 @@ OUTPUT FORMAT (STRICT JSON ONLY):
   }},
   "job_type": "general_service",
   "scheduled_date": null,
-  "time_window": null,
+  "appointment_time": null,
   "urgency": "unknown",
   "notes": ""
 }}

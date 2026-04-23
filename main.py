@@ -145,6 +145,9 @@ async def extract_contact_info(request: ExtractionRequest):
             contact.client_name or 
             contact.company_name or 
             contact.email or 
+            contact.job_type or
+            contact.scheduled_date or
+            contact.appointment_time or
             len(contact.phone_numbers) > 0 or
             contact.notes or
             (contact.address and any([
