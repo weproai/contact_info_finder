@@ -62,4 +62,7 @@ class HealthResponse(BaseModel):
     status: str
     ollama_status: str
     chromadb_status: str
+    llm_provider: Optional[str] = None
+    llm_status: Optional[str] = None
+    local_cache_status: Optional[str] = None
     timestamp: datetime

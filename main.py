@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 import time
 from datetime import datetime
+from app.cache_store import local_cache
 from app.config import settings
 from app.models import ExtractionRequest, ExtractionResponse, HealthResponse
 from app.extractor import extractor
@@ -36,15 +37,15 @@ app.add_middleware(
 async def startup_event():
     """Initialize services on startup"""
     logger.info("Starting Contact Info Finder API...")
-    
-    # Check Ollama connection
+
+    # Check selected LLM provider.
     if not extractor.health_check():
-        logger.warning("Ollama is not accessible. Make sure Ollama is running.")
-    
-    # Check ChromaDB
+        logger.warning("%s is not accessible.", extractor.provider_name())
+
+    # Check ChromaDB.
     if not chroma_manager.health_check():
         logger.warning("ChromaDB initialization failed.")
-    
+
     logger.info("API startup complete")
 
 
@@ -61,15 +62,29 @@ async def root():
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 async def health_check():
     """Check health status of all services"""
-    ollama_status = "healthy" if extractor.health_check() else "unhealthy"
-    chromadb_status = "healthy" if chroma_manager.health_check() else "unhealthy"
-    
-    overall_status = "healthy" if ollama_status == "healthy" and chromadb_status == "healthy" else "degraded"
-    
+    llm_status = extractor.provider_status()
+    ollama_status = "healthy" if settings.llm_provider == "ollama" and extractor.health_check() else (
+        "disabled" if settings.llm_provider != "ollama" else "unhealthy"
+    )
+    chromadb_status = "healthy" if chroma_manager.health_check() else (
+        "disabled" if chroma_manager.disabled_reason else "unhealthy"
+    )
+    cache_stats = local_cache.get_stats()
+    local_cache_status = "healthy" if cache_stats["enabled"] else "disabled"
+
+    overall_status = (
+        "healthy"
+        if llm_status == "healthy" and chromadb_status in {"healthy", "disabled"}
+        else "degraded"
+    )
+
     return HealthResponse(
         status=overall_status,
         ollama_status=ollama_status,
         chromadb_status=chromadb_status,
+        llm_provider=settings.llm_provider,
+        llm_status=llm_status,
+        local_cache_status=local_cache_status,
         timestamp=datetime.now()
     )
 
@@ -95,18 +110,16 @@ async def extract_contact_info(request: ExtractionRequest):
         processing_time = time.time() - start_time
         
         if not contact:
-            # Check if Ollama is running
             if not extractor.health_check():
                 return ExtractionResponse(
                     success=False,
                     status="error",
                     data=None,
-                    error="Ollama is not running. Please start Ollama with: ollama serve",
+                    error=extractor.unavailable_error_message(),
                     processing_time=processing_time,
                     cache_hit=cache_hit
                 )
-            
-            # No extraction error, but no contact info found
+
             return ExtractionResponse(
                 success=True,
                 status="not_found",
@@ -161,6 +174,8 @@ async def get_statistics():
     """Get extraction statistics"""
     try:
         stats = chroma_manager.get_stats()
+        stats["local_cache"] = local_cache.get_stats()
+        stats["llm_provider"] = settings.llm_provider
         return {
             "success": True,
             "stats": stats

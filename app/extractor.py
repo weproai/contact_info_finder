@@ -1,124 +1,155 @@
-import ollama
 import json
 import logging
 import re
 from typing import Dict, List, Optional, Tuple
+
+import ollama
 import phonenumbers
+from openai import OpenAI
+
+from app.cache_store import local_cache
 from app.config import settings
-from app.models import ExtractedContact, PhoneNumber, Address
-from app.prompts import EXTRACTION_PROMPT
 from app.database import chroma_manager
 from app.fast_extractor import FastExtractor
+from app.models import Address, ExtractedContact, PhoneNumber
+from app.prompts import EXTRACTION_PROMPT
 
 logger = logging.getLogger(__name__)
 
 
 class ContactExtractor:
     def __init__(self):
-        self.ollama_client = ollama.Client(host=settings.ollama_base_url)
-        self.model = settings.ollama_model
+        self.provider = settings.llm_provider
+        self.model = settings.openai_model if self.provider == "openai" else settings.ollama_model
+        self.openai_client = None
+        self.ollama_client = None
+
+        if self.provider == "openai" and settings.openai_api_key:
+            self.openai_client = OpenAI(
+                api_key=settings.openai_api_key,
+                timeout=settings.openai_timeout_seconds,
+            )
+        else:
+            self.ollama_client = ollama.Client(host=settings.ollama_base_url)
     
     def extract(self, text: str, use_cache: bool = True) -> Tuple[Optional[ExtractedContact], bool]:
         """Extract contact information from text"""
         cache_hit = False
-        
-        # Try fast extraction first for simple cases
+        fast_result = None
+
+        # Try fast extraction first.
         if settings.enable_fast_mode and FastExtractor.can_extract_fast(text):
             logger.info("Using fast regex extraction")
             fast_result = FastExtractor.extract_fast(text)
-            if fast_result:
-                # For better accuracy, enhance with LLM if available and fast result is incomplete
-                if (self.health_check() and 
-                    (not fast_result.address or 
-                     not fast_result.address.city or 
-                     not fast_result.address.state)):
-                    logger.info("Enhancing fast extraction with LLM")
-                    # Use LLM to enhance the extraction
-                    # But keep it fast by using a focused prompt
-                else:
-                    # Store in cache for consistency
-                    if use_cache:
-                        chroma_manager.add_extraction(text, fast_result)
-                    return fast_result, cache_hit
-        
-        # Check if Ollama is available
-        if not self.health_check():
-            logger.error("Ollama is not running or accessible")
-            # Fall back to fast extraction even for complex cases
-            fast_result = FastExtractor.extract_fast(text)
-            return fast_result, cache_hit
-        
-        # Check cache first if enabled
+            if fast_result and self._can_serve(fast_result):
+                if use_cache:
+                    self._store_cached_result(text, fast_result)
+                return fast_result, cache_hit
+
+        # Then try local memory / exact cache.
         if use_cache:
-            similar = chroma_manager.find_similar(text, n_results=1)
-            if similar and similar[0].get('distance', 1.0) < 0.1:  # Very similar text
-                logger.info("Cache hit - returning previous extraction")
+            cached = local_cache.get(text)
+            if cached:
+                logger.info("Local cache hit - returning previous extraction")
                 cache_hit = True
-                extraction_data = similar[0]['extraction']
-                return ExtractedContact(**extraction_data), cache_hit
-        
-        # Extract using Ollama
+                return ExtractedContact(**cached), cache_hit
+
+        if not settings.llm_enabled:
+            logger.warning("LLM fallback is disabled")
+            return fast_result, cache_hit
+
+        # Only then call the configured provider.
+        if not self.health_check():
+            logger.error("%s is not accessible", self.provider_name())
+            return fast_result, cache_hit
+
         try:
-            extraction_json = self._extract_with_llm(text)
+            extraction_json = self._extract_with_provider(text)
             if not extraction_json:
-                return None, cache_hit
-            
-            # Parse and validate extraction
+                return fast_result, cache_hit
+
             contact = self._parse_extraction(extraction_json, text)
-            
-            # Post-process: Fix phone numbers and check if we missed any
-            import re
-            
-            # Fix phone numbers that might have extra digits
-            fixed_phones = []
-            for phone in contact.phone_numbers:
-                # Extract just 10-digit phone numbers from the phone field
-                phone_matches = re.findall(r'\b(\d{10})\b', phone.number.replace('-', '').replace(' ', ''))
-                for match in phone_matches:
-                    if len(match) == 10:  # Valid phone number
-                        fixed_phone = PhoneNumber(
-                            number=self._normalize_phone(match),
-                            extension=phone.extension,
-                            type=phone.type
-                        )
-                        fixed_phones.append(fixed_phone)
-                        break
-            
-            # If we fixed any phones, use the fixed list
-            if fixed_phones:
-                contact.phone_numbers = fixed_phones
-            
-            # If still no phones, search the original text
-            if len(contact.phone_numbers) == 0:
-                phone_pattern = r'\b(\d{10})\b|\b(\d{3}[-.\s]?\d{3}[-.\s]?\d{4})\b'
-                phone_matches = re.findall(phone_pattern, text)
-                for match in phone_matches:
-                    phone_num = match[0] if match[0] else match[1]
-                    if phone_num and len(phone_num.replace('-', '').replace(' ', '')) >= 10:
-                        phone = PhoneNumber(
-                            number=self._normalize_phone(phone_num),
-                            extension=None,
-                            type='primary'
-                        )
-                        contact.phone_numbers.append(phone)
-                        logger.info(f"Post-processing found phone number: {phone_num}")
-            
-            # Confidence scores removed for performance
-            
-            # Store in database
-            chroma_manager.add_extraction(text, contact)
-            
+            contact = self._merge_contacts(fast_result, contact)
+            contact = self._post_process_contact(contact, text)
+
+            if use_cache and contact and self._can_serve(contact):
+                self._store_cached_result(text, contact)
+
             return contact, cache_hit
-            
         except Exception as e:
             logger.error(f"Extraction error: {str(e)}")
             logger.error(f"Full traceback: ", exc_info=True)
             return None, cache_hit
     
-    def _extract_with_llm(self, text: str) -> Optional[Dict]:
-        """Use Ollama to extract information with retry logic"""
+    def provider_name(self) -> str:
+        return "OpenAI" if self.provider == "openai" else "Ollama"
+
+    def provider_status(self) -> str:
+        if not settings.llm_enabled:
+            return "disabled"
+        if self.provider == "openai":
+            return "healthy" if bool(settings.openai_api_key) else "unhealthy"
+        return "healthy" if self.health_check() else "unhealthy"
+
+    def unavailable_error_message(self) -> str:
+        if not settings.llm_enabled:
+            return "LLM fallback is disabled."
+        if self.provider == "openai":
+            return "OpenAI is not configured. Please set OPENAI_API_KEY."
+        return "Ollama is not running. Please start Ollama with: ollama serve"
+
+    def _store_cached_result(self, text: str, extraction: ExtractedContact):
+        local_cache.set(text, extraction, self.provider, self.model)
+        chroma_manager.add_extraction(text, extraction)
+
+    def _extract_with_provider(self, text: str) -> Optional[Dict]:
+        if self.provider == "openai":
+            return self._extract_with_openai(text)
+        return self._extract_with_ollama(text)
+
+    def _extract_with_openai(self, text: str) -> Optional[Dict]:
+        """Use OpenAI to extract information with retry logic."""
+        if not self.openai_client:
+            logger.error("OpenAI client is not configured")
+            return None
+
         max_retries = 3
-        
+        for attempt in range(max_retries):
+            try:
+                prompt = EXTRACTION_PROMPT.format(text=text)
+                response = self.openai_client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Extract contact information from the user text. "
+                                "Return a single valid JSON object only. "
+                                "Do not return markdown, backticks, code, comments, or explanations."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.0,
+                    max_tokens=256,
+                )
+                response_text = (response.choices[0].message.content or "").strip()
+                logger.info(f"OpenAI response (attempt {attempt + 1}): {response_text[:500]}...")
+                result = self._parse_json_response(response_text)
+                if result is not None:
+                    return result
+            except Exception as e:
+                logger.error(f"OpenAI extraction error on attempt {attempt + 1}: {str(e)}")
+                if attempt == max_retries - 1:
+                    logger.error(f"Failed after {max_retries} attempts")
+                    return None
+        return None
+
+    def _extract_with_ollama(self, text: str) -> Optional[Dict]:
+        """Use Ollama to extract information with retry logic."""
+        max_retries = 3
+
         for attempt in range(max_retries):
             try:
                 prompt = EXTRACTION_PROMPT.format(text=text)
@@ -152,35 +183,11 @@ class ContactExtractor:
                     }
                 )
             
-                # Extract JSON from response
                 response_text = response['message']['content'].strip()
-                logger.info(f"LLM Response (attempt {attempt + 1}): {response_text[:500]}...")
-
-                json_str = response_text
-
-                # Fallback for models that still wrap the JSON in extra text.
-                if not json_str.startswith('{'):
-                    json_match = re.search(r'\{.*\}', json_str, re.DOTALL)
-                    if json_match:
-                        json_str = json_match.group()
-
-                # Fix common JSON issues from LLM
-                json_str = json_str.replace('"postaL_code"', '"postal_code"')
-                json_str = json_str.replace('"postalCode"', '"postal_code"')
-                json_str = json_str.replace('"ext or null"', 'null')
-                json_str = json_str.replace('"null"', 'null')
-
-                try:
-                    result = json.loads(json_str)
-                    logger.info(f"Successfully extracted JSON on attempt {attempt + 1}")
+                logger.info(f"Ollama response (attempt {attempt + 1}): {response_text[:500]}...")
+                result = self._parse_json_response(response_text)
+                if result is not None:
                     return result
-                except json.JSONDecodeError as e:
-                    logger.warning(f"JSON decode error on attempt {attempt + 1}: {e}")
-                    if attempt == max_retries - 1:
-                        logger.error(f"Failed to parse JSON after {max_retries} attempts")
-                        return None
-                    continue
-            
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse LLM response as JSON: {e}")
                 return None
@@ -192,6 +199,109 @@ class ContactExtractor:
                 continue
         
         return None
+
+    def _parse_json_response(self, response_text: str) -> Optional[Dict]:
+        json_str = response_text.strip()
+
+        if not json_str.startswith('{'):
+            json_match = re.search(r'\{.*\}', json_str, re.DOTALL)
+            if json_match:
+                json_str = json_match.group()
+
+        json_str = json_str.replace('"postaL_code"', '"postal_code"')
+        json_str = json_str.replace('"postalCode"', '"postal_code"')
+        json_str = json_str.replace('"ext or null"', 'null')
+        json_str = json_str.replace('"null"', 'null')
+
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON decode error: {e}")
+            return None
+
+    def _merge_contacts(
+        self,
+        regex_contact: Optional[ExtractedContact],
+        llm_contact: Optional[ExtractedContact],
+    ) -> Optional[ExtractedContact]:
+        if regex_contact and not llm_contact:
+            return regex_contact
+        if llm_contact and not regex_contact:
+            return llm_contact
+        if not regex_contact and not llm_contact:
+            return None
+
+        regex_address = regex_contact.address if regex_contact else None
+        llm_address = llm_contact.address if llm_contact else None
+        merged_address = None
+        if regex_address or llm_address:
+            merged_address = Address(
+                unit=(regex_address.unit if regex_address else None) or (llm_address.unit if llm_address else None),
+                street=(regex_address.street if regex_address else None) or (llm_address.street if llm_address else None),
+                city=(regex_address.city if regex_address else None) or (llm_address.city if llm_address else None),
+                state=(regex_address.state if regex_address else None) or (llm_address.state if llm_address else None),
+                postal_code=(regex_address.postal_code if regex_address else None) or (llm_address.postal_code if llm_address else None),
+                country=(regex_address.country if regex_address else None) or (llm_address.country if llm_address else None),
+            )
+
+        return ExtractedContact(
+            client_name=(regex_contact.client_name if regex_contact else None) or (llm_contact.client_name if llm_contact else None),
+            company_name=(regex_contact.company_name if regex_contact else None) or (llm_contact.company_name if llm_contact else None),
+            phone_numbers=(regex_contact.phone_numbers if regex_contact and regex_contact.phone_numbers else llm_contact.phone_numbers),
+            email=(regex_contact.email if regex_contact else None) or (llm_contact.email if llm_contact else None),
+            address=merged_address,
+            notes=(regex_contact.notes if regex_contact else None) or (llm_contact.notes if llm_contact else None),
+            raw_text=llm_contact.raw_text if llm_contact else regex_contact.raw_text,
+        )
+
+    def _post_process_contact(self, contact: ExtractedContact, text: str) -> ExtractedContact:
+        fixed_phones = []
+        for phone in contact.phone_numbers:
+            phone_matches = re.findall(r'\b(\d{10})\b', phone.number.replace('-', '').replace(' ', ''))
+            for match in phone_matches:
+                if len(match) == 10:
+                    fixed_phone = PhoneNumber(
+                        number=self._normalize_phone(match),
+                        extension=phone.extension,
+                        type=phone.type
+                    )
+                    fixed_phones.append(fixed_phone)
+                    break
+
+        if fixed_phones:
+            contact.phone_numbers = fixed_phones
+
+        if len(contact.phone_numbers) == 0:
+            phone_pattern = r'\b(\d{10})\b|\b(\d{3}[-.\s]?\d{3}[-.\s]?\d{4})\b'
+            phone_matches = re.findall(phone_pattern, text)
+            for match in phone_matches:
+                phone_num = match[0] if match[0] else match[1]
+                if phone_num and len(phone_num.replace('-', '').replace(' ', '')) >= 10:
+                    phone = PhoneNumber(
+                        number=self._normalize_phone(phone_num),
+                        extension=None,
+                        type='primary'
+                    )
+                    contact.phone_numbers.append(phone)
+                    logger.info(f"Post-processing found phone number: {phone_num}")
+
+        return contact
+
+    def _can_serve(self, contact: Optional[ExtractedContact]) -> bool:
+        if not contact:
+            return False
+        return bool(
+            contact.client_name
+            or contact.company_name
+            or contact.email
+            or contact.phone_numbers
+            or (contact.address and any([
+                contact.address.street,
+                contact.address.city,
+                contact.address.state,
+                contact.address.postal_code,
+            ]))
+        )
     
     def _parse_extraction(self, extraction_data: Dict, raw_text: str) -> ExtractedContact:
         """Parse and validate extracted data"""
@@ -342,7 +452,13 @@ class ContactExtractor:
     
     
     def health_check(self) -> bool:
-        """Check if Ollama is accessible"""
+        """Check if the selected provider is accessible."""
+        if not settings.llm_enabled:
+            return False
+
+        if self.provider == "openai":
+            return bool(settings.openai_api_key)
+
         try:
             self.ollama_client.list()
             return True
